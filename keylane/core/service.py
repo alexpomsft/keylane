@@ -153,6 +153,8 @@ class VaultService:
         self._epoch = 0
         # UI-thread state
         self.session = Session.LOCKED if settings.vault else Session.NO_VAULT
+        # Settings objects are shared with (and mutated by) the UI, so remember what is configured.
+        self._configured = (settings.vault_path, settings.keyfile_path)
         self.storage = Storage.IDLE
         self.snapshot: Snapshot | None = None
         self.usage = UsageTracker()
@@ -315,9 +317,11 @@ class VaultService:
         self._worker.stop()
 
     def reconfigure(self, settings: Settings) -> None:
-        if settings.vault_path != self.settings.vault_path or settings.keyfile_path != self.settings.keyfile_path:
+        configured = (settings.vault_path, settings.keyfile_path)
+        if configured != self._configured:
             self.lock("vault-changed")
             self.session = Session.LOCKED if settings.vault else Session.NO_VAULT
+        self._configured = configured
         self.settings = settings
         self._last_stat = storage.stat_key(settings.vault) if settings.vault else None
         self._emit("session")

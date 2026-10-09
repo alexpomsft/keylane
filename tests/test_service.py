@@ -262,3 +262,21 @@ def test_change_credentials(env):
     svc.change_credentials(PW, None, "new-pass", None, cb)
     assert box["err"] is None
     VaultDocument.open_bytes(vault.read_bytes(), make_composite("new-pass", None))
+
+
+def test_reconfigure_detects_vault_set_on_shared_settings(env):
+    # The UI mutates the same Settings object it shares with the service.
+    s, vault = env
+    path = s.vault_path
+    s.vault_path = ""
+    svc = make(s)
+    assert svc.session == Session.NO_VAULT
+    s.vault_path = path
+    svc.reconfigure(s)
+    assert svc.session == Session.LOCKED
+    box, cb = result()
+    svc.unlock(PW, cb)
+    assert box["err"] is None and svc.session == Session.UNLOCKED
+    s.vault_path = ""
+    svc.reconfigure(s)
+    assert svc.session == Session.NO_VAULT and svc.snapshot is None
