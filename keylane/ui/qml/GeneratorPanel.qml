@@ -19,6 +19,8 @@ ColumnLayout {
     }
     function set(k, v) { const s = Object.assign({}, spec); s[k] = v; spec = s; regenerate() }
     Component.onCompleted: regenerate()
+    // Panels are kept alive while hidden; never reshow a stale candidate.
+    onVisibleChanged: if (visible) regenerate()
 
     RowLayout {
         spacing: th.s(6)

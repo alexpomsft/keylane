@@ -73,6 +73,16 @@ ApplicationWindow {
     function syncListToEditor() {
         const m = kl.entriesModel
         for (let i = 0; i < m.count; i++) if (m.get(i).entryId === editor.entryId) { list.currentIndex = i; return }
+        list.currentIndex = -1
+    }
+    // Row indices shift whenever the list is re-filtered or the vault changes;
+    // keep the highlight on the entry the editor shows, not on a stale index.
+    Connections {
+        target: kl.entriesModel
+        function onModelReset() { Qt.callLater(win.syncListToEditor) }
+        function onRowsInserted() { Qt.callLater(win.syncListToEditor) }
+        function onRowsRemoved() { Qt.callLater(win.syncListToEditor) }
+        function onDataChanged() { Qt.callLater(win.syncListToEditor) }
     }
     function newEntry(prefill) {
         confirmLeave(function (ok) {

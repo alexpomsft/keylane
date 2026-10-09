@@ -1,40 +1,95 @@
+<div align="center">
+
 # Keylane
 
-A keyboard-first password manager for Linux/Wayland that reads and writes
-standard **KeePass KDBX** files. Built for Hyprland/Omarchy: one shortcut opens
-a fast overlay, you type a few letters, press Enter, and the password is on the
-clipboard and out of clipboard history.
+**A keyboard-first password manager for Linux and Wayland that reads and
+writes standard KeePass (KDBX) files.**
 
-- **Launcher overlay**: a layer-shell card on the active monitor that never
-  reflows your tiles. Fuzzy search over titles, groups, URLs and tags only.
-  On 10,000 entries it opens in about 8 ms and updates results within about
-  14 ms (p50; see [docs/PERFORMANCE.md](docs/PERFORMANCE.md)).
-- **Create without leaving the keyboard**: Ctrl+N in the launcher, then Tab
-  through the fields. The password is pre-generated. Enter saves and copies;
-  Ctrl+E hands the draft over to the manager.
-- **Manager window**: groups, entries, custom fields, attachments, history,
-  trash, generator, settings and conflict resolution.
-- **Your files stay KeePass files**: lossless KDBX 3.1/4.x editing, checked
-  against KeePassXC ([docs/FORMATS.md](docs/FORMATS.md)).
-- **Safe with sync clients like OneDrive**:
-  - writes are atomic;
-  - edits are merged against a three-way baseline;
-  - competing edits are kept, never silently dropped ([docs/SYNC.md](docs/SYNC.md)).
-- **Locks when it should**:
-  - on desktop lock, suspend and shutdown, with plaintext dropped *before* sleep;
-  - no inactivity timeout unless you configure one
-    ([docs/SECURITY.md](docs/SECURITY.md)).
-- **Looks native**: uses Omarchy's live palette and font, follows theme
-  changes instantly, and has light/dark fallbacks elsewhere.
+One shortcut opens it, a few letters find the entry, and Enter copies the
+password. Your vault stays an ordinary `.kdbx` file that KeePassXC, KeePassDX
+and Strongbox can still open.
+
+<img src="docs/media/quick-search.gif" alt="Typing a few letters in the Keylane launcher finds entries even with typos; Enter copies the password" width="780">
+
+</div>
+
+## Why Keylane
+
+- **Copy a password in under a second.** The launcher is a layer-shell
+  overlay on the active monitor, so it never reshuffles your tiled windows.
+  Search covers titles, groups, URLs and tags, and tolerates typos (`githbu`)
+  and initials (`boe` finds *Bank of Example*). With 10,000 entries it opens
+  in about 8 ms and updates results in about 14 ms (p50, see
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md)).
+- **Clipboard hygiene.** Copied secrets are marked sensitive so clipboard
+  history tools skip them, and they are cleared after 20 s.
+- **Create entries without touching the mouse.** If a search finds nothing,
+  Ctrl+N turns the query into a new entry with a strong password already
+  generated. Enter saves and copies it.
+- **A full manager when you need one**, covering groups, custom fields,
+  attachments, history, trash and the generator. The keyboard drives all of it.
+- **Safe on OneDrive, Syncthing and Dropbox.** Writes are atomic, and edits
+  are merged against a three-way baseline. When two devices change the same
+  field, you choose which version to keep; nothing is lost
+  ([docs/SYNC.md](docs/SYNC.md)).
+- **Lossless KeePass compatibility.** Keylane edits KDBX 3.1 and 4.x files
+  in place, preserving fields it doesn't understand. Interop is tested against
+  `keepassxc-cli` ([docs/FORMATS.md](docs/FORMATS.md)).
+- **Locks when it should.** It locks on desktop lock, suspend and shutdown,
+  and drops plaintext *before* sleep. There is no surprise inactivity timer
+  unless you set one ([docs/SECURITY.md](docs/SECURITY.md)).
+- **Looks at home on Omarchy.** It uses your live Omarchy palette and font,
+  follows theme changes instantly, and falls back to light or dark themes on
+  other desktops.
+
+## Tour
+
+<table>
+<tr>
+<td width="50%"><img src="docs/media/launcher.png" alt="Launcher with search results"><br><sub><b>Launcher.</b> Results show user, group and site. Hints for every key are in the footer.</sub></td>
+<td width="50%"><img src="docs/media/unlock.png" alt="Unlock prompt"><br><sub><b>Unlock.</b> The same overlay asks for your master password. Keylane always starts locked.</sub></td>
+</tr>
+</table>
+
+### Create in place
+
+<img src="docs/media/create.gif" alt="Ctrl+N turns the query into a new entry; Ctrl+R regenerates; Ctrl+G opens the generator; Enter saves and copies" width="780">
+
+### Manager
+
+<img src="docs/media/manager.png" alt="Manager window with groups, entry list and editor">
+
+### Sync conflicts, resolved field by field
+
+When another device edited the same entry, Keylane pauses saving and shows
+both versions side by side. You can keep either version, keep both, or pick
+individual fields.
+
+<img src="docs/media/conflicts.png" alt="Conflict resolution comparing this device and the other device">
+
+### Settings and generator
+
+<img src="docs/media/settings.png" alt="Settings page with vault, locking, clipboard and password generator options">
+
+<sub>All screenshots use a synthetic demo vault.</sub>
 
 ## Quick start
 
+Arch-based systems (including Omarchy) need these packages:
+
 ```sh
-python -m venv --system-site-packages .venv      # PySide6 ≥ 6.6 from the system
-.venv/bin/pip install -e '.[test]'
-scripts/fetch-layershell.sh                       # only if layer-shell-qt isn't installed
-.venv/bin/keylane                                 # opens the launcher; first run offers create/open
+sudo pacman -S --needed pyside6 python-pykeepass python-rapidfuzz layer-shell-qt wl-clipboard
+git clone https://github.com/alexpomsft/keylane && cd keylane
+python -m venv --system-site-packages .venv
+.venv/bin/pip install -e .
+ln -s "$PWD/.venv/bin/keylane" ~/.local/bin/keylane
+keylane                                           # opens the launcher; first run offers create/open
 ```
+
+If you can't install the `layer-shell-qt` package, `scripts/fetch-layershell.sh`
+fetches a private copy. There is also an Arch package recipe in
+[`packaging/PKGBUILD`](packaging/PKGBUILD). See
+[docs/INSTALL.md](docs/INSTALL.md) for other distributions.
 
 Bind it to a key yourself (Keylane never edits your compositor config):
 
@@ -45,6 +100,16 @@ o.bind("SUPER + ALT + K", "Keylane", "keylane")
 
 For classic `hyprland.conf` syntax and other setups, see
 [docs/INSTALL.md](docs/INSTALL.md).
+
+### Omarchy bar widget
+
+[omarchy-keylane](https://github.com/alexpomsft/omarchy-keylane) adds a lock
+icon to the Omarchy bar that shows whether the vault is unlocked. Left-click
+opens the launcher, middle-click opens the manager, and right-click locks:
+
+```sh
+omarchy plugin add https://github.com/alexpomsft/omarchy-keylane --enable
+```
 
 ## Launcher keys
 

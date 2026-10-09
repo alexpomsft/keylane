@@ -4,6 +4,7 @@ pkgname=keylane
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Keyboard-first KeePass (KDBX) password manager for Wayland/Hyprland"
+url="https://github.com/alexpomsft/keylane"
 arch=('any')
 license=('GPL-3.0-or-later')
 depends=('python' 'pyside6' 'python-pykeepass' 'python-rapidfuzz' 'python-lxml'
