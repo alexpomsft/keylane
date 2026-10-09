@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=Keylane
+GenericName=Password Manager
+Comment=Keyboard-first KeePass password manager
+Exec=keylane manager
+Icon=keylane
+Terminal=false
+Categories=Utility;Security;Qt;
+Keywords=password;keepass;kdbx;vault;login;
+StartupNotify=false
+Actions=search;lock;
+
+[Desktop Action search]
+Name=Quick Search
+Exec=keylane search
+
+[Desktop Action lock]
+Name=Lock
+Exec=keylane lock

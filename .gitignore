@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+/build/
+/dist/
+*.egg-info/
+/tmp/
+# Never commit real vaults or key files; synthetic fixtures are generated at test time.
+*.kdbx
+*.keyx
+*.key
+!tests/fixtures/README.md
+vendor/

@@ -1,0 +1,36 @@
+# Maintainer: Keylane developers
+# Builds the package from this source checkout:  cd packaging && makepkg -si
+pkgname=keylane
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Keyboard-first KeePass (KDBX) password manager for Wayland/Hyprland"
+arch=('any')
+license=('GPL-3.0-or-later')
+depends=('python' 'pyside6' 'python-pykeepass' 'python-rapidfuzz' 'python-lxml'
+         'python-argon2-cffi' 'layer-shell-qt' 'wl-clipboard' 'systemd')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+checkdepends=('python-pytest')
+optdepends=('keepassxc: interoperability tests'
+            'wtype: desktop latency benchmark (scripts/bench.py --desktop)')
+
+_src() { realpath "$startdir/.."; }
+
+build() {
+  cd "$(_src)"
+  python -m build --wheel --no-isolation --outdir "$srcdir/dist"
+}
+
+check() {
+  cd "$(_src)"
+  KEYLANE_RUNTIME_DIR="$srcdir/run" python -m pytest -q -p no:cacheprovider tests
+}
+
+package() {
+  local src; src="$(_src)"
+  python -m installer --destdir="$pkgdir" "$srcdir"/dist/*.whl
+  install -Dm644 "$src/packaging/keylane.desktop" "$pkgdir/usr/share/applications/keylane.desktop"
+  install -Dm644 "$src/keylane/assets/keylane.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/keylane.svg"
+  install -Dm644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$src/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname/" "$src"/docs/*.md
+}
