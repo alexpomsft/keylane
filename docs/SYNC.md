@@ -34,6 +34,17 @@ by UUID:
   fields of one entry, additions on both sides, and moves that don't collide.
 - **Timestamps never decide a winner.** Clocks may differ, so they are used
   only to order history.
+- Unused expiry dates on non-expiring entries are ignored when comparing
+  content and history. Strongbox removes these dates on save; this does not
+  mean the entries changed. Enabled expiration dates still count as content.
+- Empty standard fields (Title, UserName, Password, URL, Notes) compare equal
+  to missing ones whatever their protection flag, and so do default
+  AutoType/quality-check settings and `null` (inherit) group AutoType/search
+  flags. Protection flags of standard fields are ignored when checking whether
+  another device's save includes Keylane's last one, because clients rewrite
+  them from the database's memory-protection setting; a three-way merge still
+  carries such a flag change. Non-default settings, custom fields and their
+  protection, and unknown extensions still count as content.
 - **Ambiguous cases become conflicts:**
   - both sides changed the same field;
   - an edit on one side and a deletion on the other;

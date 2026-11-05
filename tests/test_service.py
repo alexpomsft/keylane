@@ -1,6 +1,7 @@
 import time
 
 import pytest
+from lxml import etree
 
 from keylane.core import errors, storage
 from keylane.core.config import Settings
@@ -144,6 +145,87 @@ def test_external_change_merged_on_save(env):
     doc = VaultDocument.open_bytes(vault.read_bytes(), make_composite(PW, None))
     titles = {x.title for x in doc.summaries()}
     assert {"GitHub", "FromPhone", "FromLaptop"} <= titles
+
+
+@pytest.mark.parametrize("reconcile", ["poll", "unlock", "merge-file"])
+def test_phone_save_omits_defaults_without_conflicts(env, tmp_path, reconcile):
+    s, vault = env
+    def keylane_shape(doc):
+        doc.create_entry(EntryData(None, title="Unchanged"))
+        for entry in doc.root.iter("Entry"):
+            for string in entry.findall("String"):
+                if string.findtext("Key") == "Password":
+                    if string.findtext("Value"):
+                        string.find("Value").set("Protected", "False")
+                    else:
+                        entry.remove(string)
+        for group in doc.root.iter("Group"):
+            for tag in ("EnableAutoType", "EnableSearching"):
+                el = group.find(tag)
+                if el is None:
+                    el = etree.SubElement(group, tag)
+                el.text = "null"
+
+    _external_edit(vault, keylane_shape)
+    svc = unlocked(s)
+    eid = first_id(svc, "GitHub")
+    if reconcile == "unlock":
+        svc.lock()
+    target = vault
+    if reconcile == "merge-file":
+        target = tmp_path / "phone.kdbx"
+        target.write_bytes(vault.read_bytes())
+
+    def phone_save(doc):
+        data = doc.read_entry(eid)
+        data.password = "phone-pw"
+        doc.update_entry(data)
+        for times in doc.root.iter("Times"):
+            if times.findtext("Expires") == "False":
+                expiry = times.find("ExpiryTime")
+                if expiry is not None:
+                    times.remove(expiry)
+        for entry in doc.root.iter("Entry"):
+            for string in entry.findall("String"):
+                value = string.find("Value")
+                if (string.findtext("Key") in ("Title", "UserName", "Password", "URL", "Notes")
+                        and not value.text and value.get("Protected") != "True"):
+                    entry.remove(string)
+            at = entry.find("AutoType")
+            if at is not None:
+                entry.remove(at)
+            # Strongbox writes every Password, protected, even when empty.
+            pw = next((x for x in entry.findall("String") if x.findtext("Key") == "Password"), None)
+            if pw is None:
+                pw = etree.SubElement(entry, "String")
+                etree.SubElement(pw, "Key").text = "Password"
+                etree.SubElement(pw, "Value")
+            pw.find("Value").set("Protected", "True")
+        for group in doc.root.iter("Group"):
+            for tag in ("EnableAutoType", "EnableSearching"):
+                el = group.find(tag)
+                if el is not None and el.text == "null":
+                    group.remove(el)
+
+    _external_edit(target, phone_save)
+    if reconcile == "poll":
+        svc.poll_external()
+    else:
+        box, cb = result()
+        if reconcile == "unlock":
+            svc.unlock(PW, cb)
+        else:
+            svc.merge_file(target, None, None, cb)
+        assert box["err"] is None
+    assert svc.storage == Storage.IDLE
+    assert not svc.conflicts
+    box, cb = result()
+    svc.get_field(eid, "Password", cb)
+    assert box["err"] is None
+    assert box["res"] == "phone-pw"
+    disk = VaultDocument.open_bytes(vault.read_bytes(), make_composite(PW, None))
+    assert disk.get_field(eid, "Password") == "phone-pw"
+    assert len(disk.summaries()) == 2
 
 
 def test_conflict_blocks_save_and_copy(env):

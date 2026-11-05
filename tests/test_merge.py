@@ -868,6 +868,158 @@ def test_descends_from_edit_with_history():
     assert not descends_from(side(remote), side(base))
 
 
+@pytest.mark.parametrize("remove", [False, True])
+def test_inactive_expiry_rewrite_preserves_ancestry(remove):
+    base = base_doc()
+    remote = copy.deepcopy(base)
+    for entry in entries(remote).values():
+        expiry = entry.find("Times/ExpiryTime")
+        if remove:
+            expiry.getparent().remove(expiry)
+        else:
+            expiry.text = ts(999)
+    assert semantic_equal(base, remote)
+    assert fingerprint(entries(base)[E1]) == fingerprint(entries(remote)[E1])
+    assert descends_from(side(base), side(remote))
+
+    set_str(remote, E1, "Password", "phone-pw", push_history=True)
+    assert descends_from(side(base), side(remote))
+    res = run(None, base, remote)
+    assert not res.conflicts
+    assert get_str(entries(res.root)[E1], "Password") == "phone-pw"
+
+
+@pytest.mark.parametrize("omitted", ["empty-strings", "autotype", "autotype-children", "quality-check"])
+def test_strongbox_default_omissions_preserve_ancestry(omitted):
+    base = base_doc()
+    for entry in entries(base).values():
+        etree.SubElement(entry, "QualityCheck").text = "True"
+        at = entry.find("AutoType")
+        etree.SubElement(at, "DataTransferObfuscation").text = "0"
+        etree.SubElement(at, "DefaultSequence")
+    remote = copy.deepcopy(base)
+    for entry in entries(remote).values():
+        if omitted == "empty-strings":
+            for string in entry.findall("String"):
+                value = string.find("Value")
+                if not value.text and value.get("Protected") != "True":
+                    entry.remove(string)
+        elif omitted == "autotype-children":
+            at = entry.find("AutoType")
+            for tag in ("DataTransferObfuscation", "DefaultSequence"):
+                at.remove(at.find(tag))
+        else:
+            entry.remove(entry.find("AutoType" if omitted == "autotype" else "QualityCheck"))
+    assert semantic_equal(base, remote)
+    assert descends_from(side(base), side(remote))
+    for u, entry in entries(base).items():
+        assert fingerprint(entry) == fingerprint(entries(remote)[u])
+
+    set_str(remote, E1, "Password", "phone-pw", push_history=True)
+    assert descends_from(side(base), side(remote))
+    res = run(None, base, remote)
+    assert not res.conflicts
+    assert get_str(entries(res.root)[E1], "Password") == "phone-pw"
+
+
+@pytest.mark.parametrize("xml", [
+    "<AutoType><Enabled>False</Enabled></AutoType>",
+    "<AutoType><Enabled>True</Enabled><DataTransferObfuscation>1</DataTransferObfuscation></AutoType>",
+    "<AutoType><Enabled>True</Enabled><DefaultSequence>{USERNAME}</DefaultSequence></AutoType>",
+    "<AutoType><Association><Window>Example</Window><KeystrokeSequence>{PASSWORD}</KeystrokeSequence></Association></AutoType>",
+    "<AutoType><FutureSetting>value</FutureSetting></AutoType>",
+    '<AutoType extension="value"><Enabled>True</Enabled></AutoType>',
+    '<AutoType><Enabled extension="value">True</Enabled></AutoType>',
+    "<QualityCheck>False</QualityCheck>",
+])
+def test_nondefault_entry_settings_remain_semantic(xml):
+    base = base_doc()
+    remote = copy.deepcopy(base)
+    setting = etree.fromstring(xml)
+    entry = entries(remote)[E1]
+    old = entry.find(setting.tag)
+    if old is not None:
+        entry.remove(old)
+    entry.append(setting)
+    assert not semantic_equal(base, remote)
+    assert fingerprint(entries(base)[E1]) != fingerprint(entry)
+    assert not descends_from(side(base), side(remote))
+    res = run(None, base, remote)
+    assert len(res.conflicts) == 1
+    assert res.conflicts[0].fields == [setting.tag]
+
+
+@pytest.mark.parametrize("protected", [False, True])
+def test_missing_empty_custom_field_remains_semantic(protected):
+    base = base_doc()
+    set_str(base, E1, "Custom", "")
+    if protected:
+        entries(base)[E1].find("String[Key='Custom']/Value").set("Protected", "True")
+    remote = copy.deepcopy(base)
+    entry = entries(remote)[E1]
+    entry.remove(entry.find("String[Key='Custom']"))
+    assert not semantic_equal(base, remote)
+    assert not descends_from(side(base), side(remote))
+
+
+def test_strongbox_protected_empty_password_and_null_group_flags_preserve_ancestry():
+    base = base_doc()
+    for entry in entries(base).values():
+        entry.find("String[Key='Password']/Value").attrib.pop("Protected")
+    entry = entries(base)[E3]
+    entry.remove(entry.find("String[Key='Password']"))
+    for g in groups(base).values():
+        etree.SubElement(g, "EnableAutoType").text = "null"
+        etree.SubElement(g, "EnableSearching").text = "null"
+    set_str(base, E3, "Notes", "old", push_history=True)
+    remote = copy.deepcopy(base)
+    for e in remote.find("Root").iter("Entry"):
+        pw = e.find("String[Key='Password']")
+        if pw is None:
+            pw = etree.SubElement(e, "String")
+            etree.SubElement(pw, "Key").text = "Password"
+            etree.SubElement(pw, "Value")
+        pw.find("Value").set("Protected", "True")
+    for g in groups(remote).values():
+        for tag in ("EnableAutoType", "EnableSearching"):
+            g.remove(g.find(tag))
+    assert descends_from(side(base), side(remote))
+    # Without a baseline, a protection-flag-only difference is not a conflict either.
+    assert not run(None, base, remote).conflicts
+
+    # A remote protection change is still carried by a three-way merge.
+    base, local, remote = base, copy.deepcopy(base), remote
+    set_str(local, E2, "Notes", "laptop")
+    res = run(base, local, remote)
+    assert not res.conflicts
+    assert entries(res.root)[E1].find("String[Key='Password']/Value").get("Protected") == "True"
+    assert get_str(entries(res.root)[E2], "Notes") == "laptop"
+
+
+@pytest.mark.parametrize("value", ["false", "true"])
+def test_explicit_group_flags_remain_semantic(value):
+    base = base_doc()
+    remote = copy.deepcopy(base)
+    etree.SubElement(groups(remote)[G1], "EnableSearching").text = value
+    assert not semantic_equal(base, remote)
+    res = run(None, base, remote)
+    assert [c.fields for c in res.conflicts] == [["EnableSearching"]]
+
+
+def test_enabled_expiry_changes_remain_semantic():
+    base = base_doc()
+    entries(base)[E1].find("Times/Expires").text = "True"
+    base, local, remote = three(base)
+    entries(local)[E1].find("Times/ExpiryTime").text = ts(1)
+    entries(remote)[E1].find("Times/ExpiryTime").text = ts(2)
+    assert not semantic_equal(base, remote)
+    assert fingerprint(entries(base)[E1]) != fingerprint(entries(remote)[E1])
+    assert not descends_from(side(base), side(remote))
+    res = run(base, local, remote)
+    assert len(res.conflicts) == 1
+    assert res.conflicts[0].fields == ["ExpiryTime"]
+
+
 def test_descends_from_stale_copy_false():
     base = base_doc()
     local = copy.deepcopy(base)

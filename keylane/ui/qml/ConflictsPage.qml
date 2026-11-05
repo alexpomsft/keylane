@@ -147,6 +147,13 @@ Item {
                 spacing: th.s(12)
                 KText { text: cp.detail ? (cp.detail.title || "(untitled)") : ""; font.pixelSize: th.base + 6; font.bold: true; Layout.fillWidth: true }
                 KText { text: cp.detail ? cp.detail.reasonText : ""; color: th.warning; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                KText {
+                    visible: !!cp.detail && cp.detail.fields.length > 0
+                    text: cp.detail ? "Conflicting fields: " + cp.detail.fields.join(", ") : ""
+                    color: th.warning
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                }
 
                 // Non-entry conflicts (groups, settings, delete-vs-edit)
                 GridLayout {

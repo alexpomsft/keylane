@@ -161,12 +161,26 @@ def _canon(el: _Element) -> tuple:
     return (el.tag, tuple(sorted(el.attrib.items())), text, kids)
 
 
-def _leaf_value(el: _Element) -> Any:
-    """Canonical value of a simple element; empty elements equal a missing one."""
+def _leaf_value(el: _Element, default: str = "") -> Any:
+    """Canonical simple value; empty/default elements equal a missing one."""
     c = _canon(el)
-    if not c[1] and not c[3] and not c[2]:
+    if not c[1] and not c[3] and c[2] in ("", default):
         return _MISSING
     return c
+
+
+def _auto_type_value(el: _Element) -> Any:
+    """Compare AutoType without optional defaults, retaining unknown settings."""
+    defaults = {
+        ("Enabled", (), "True", ()),
+        ("DataTransferObfuscation", (), "0", ()),
+        ("DefaultSequence", (), "", ()),
+    }
+    tag, attrs, text, children = _canon(el)
+    children = tuple(c for c in children if c not in defaults)
+    if not attrs and not text and not children:
+        return _MISSING
+    return (tag, attrs, text, children)
 
 
 def _is_protected(value: _Element | None) -> bool:
@@ -291,29 +305,50 @@ def _custom_data_items(container: _Element | None) -> dict[str, _Element]:
     return items
 
 
-def _entry_fields(entry: _Element, bkey: BinaryKey = _ref_identity) -> dict[FieldKey, Any]:
-    """Semantic fields of an entry (without location/history/bookkeeping times)."""
+def _entry_fields(
+    entry: _Element, bkey: BinaryKey = _ref_identity, *, std_flags: bool = True,
+) -> dict[FieldKey, Any]:
+    """Semantic fields of an entry (without location/history/bookkeeping times).
+
+    ``std_flags=False`` ignores the protection flag of standard fields, which
+    clients rewrite from ``Meta/MemoryProtection`` (used for ancestry only).
+    """
     out: dict[FieldKey, Any] = {}
     for child in entry:
         if not _is_el(child):
             continue
         tag = child.tag
         if tag == "String":
+            key = child.findtext("Key") or ""
             v = child.find("Value")
             text = None if v is None else (v.text or "")
-            out[("S", child.findtext("Key") or "")] = (text, _is_protected(v))
+            protected = _is_protected(v)
+            if key in _STD_STRINGS:
+                # Strongbox writes empty standard fields (protected) that others omit.
+                if text == "":
+                    continue
+                if not std_flags:
+                    protected = None
+            out[("S", key)] = (text, protected)
         elif tag == "Binary":
             out[("B", child.findtext("Key") or "")] = _binary_value(child.find("Value"), bkey)
         elif tag == "CustomData":
             for k, item in _custom_data_items(child).items():
                 out[("C", k)] = item.findtext("Value") or ""
         elif tag == "Times":
+            expires = (child.findtext("Expires") or "").strip().lower() == "true"
             for t in ("Expires", "ExpiryTime"):
+                # Strongbox drops the unused expiry date on non-expiring entries.
+                if t == "ExpiryTime" and not expires:
+                    continue
                 te = child.find(t)
                 if te is not None:
                     out[("T", t)] = (te.text or "").strip()
         elif tag in _ENTRY_SIMPLE:
-            val = _leaf_value(child)
+            if tag == "AutoType":
+                val = _auto_type_value(child)
+            else:
+                val = _leaf_value(child, "True" if tag == "QualityCheck" else "")
             if val is not _MISSING:
                 out[("E", tag)] = val
         elif tag in _ENTRY_IGNORED:
@@ -333,6 +368,11 @@ def _group_fields(group: _Element) -> dict[FieldKey, Any]:
         if tag == "CustomData":
             for k, item in _custom_data_items(child).items():
                 out[("C", k)] = item.findtext("Value") or ""
+        elif tag in ("EnableAutoType", "EnableSearching"):
+            # Tri-state; "null" (inherit) equals a missing element, as Strongbox writes it.
+            val = (child.text or "").strip().lower()
+            if val not in ("", "null"):
+                out[("E", tag)] = val
         elif tag in _GROUP_SIMPLE:
             val = _leaf_value(child)
             if val is not _MISSING:
@@ -731,20 +771,26 @@ def descends_from(ancestor: Side, descendant: Side) -> bool:
     entry must be present in the descendant with the same fingerprint, appear
     in the descendant entry's History, or be listed in its DeletedObjects.
     Every ancestor group must be present (any content) or listed as deleted.
-    Location changes are irrelevant.
+    Location changes are irrelevant, as are protection flags of standard
+    fields (rewritten by clients from the database's memory-protection setting).
     """
     anc = _Doc(ancestor.root)
     desc = _Doc(descendant.root, anc.root_uuid)
+
+    def key(el: _Element, pool: Sequence[bytes]) -> tuple:
+        bkey = _hash_bkey(pool) if pool else _ref_identity
+        return _content_key(_entry_fields(el, bkey, std_flags=False))
+
     for u, a_el in anc.entries.items():
         if u in desc.deleted:
             continue
         d_el = desc.entries.get(u)
         if d_el is None:
             return False
-        fp = fingerprint(a_el, ancestor.binaries)
-        if fingerprint(d_el, descendant.binaries) == fp:
+        fp = key(a_el, ancestor.binaries)
+        if key(d_el, descendant.binaries) == fp:
             continue
-        if not any(fingerprint(h, descendant.binaries) == fp for h in _history_items(d_el)):
+        if not any(key(h, descendant.binaries) == fp for h in _history_items(d_el)):
             return False
     return all(g in desc.groups or g in desc.deleted for g in anc.groups)
 
@@ -946,7 +992,11 @@ class _Merger:
         l, r = self.l, self.r
         fl, fr = self._efields(l, u), self._efields(r, u)
         sources = [L, R]
-        if fl == fr:
+        same_ignoring_flags = (
+            l.entry_parent[u] == r.entry_parent[u]
+            and _entry_fields(L, std_flags=False) == _entry_fields(R, std_flags=False)
+        )
+        if fl == fr or same_ignoring_flags:
             self.kept_entries[u] = _Kept(self._with_history(L, sources), l.entry_parent[u])
             return
         cl = _content_key(_entry_fields(L))
